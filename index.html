@@ -113,29 +113,37 @@
         .chat-messages::-webkit-scrollbar-thumb{background:#2f4050;border-radius:10px}
         .chat-messages::-webkit-scrollbar-thumb:hover{background:#4f8cc9}
 
-        /* === SCROLL DOWN BUTTON === */
+        /* === SCROLL DOWN BUTTON - ARRASTRABLE === */
         .scroll-down-btn{
-            position:absolute;
-            bottom:20px;
+            position:fixed;
+            bottom:100px;
             right:20px;
-            background:rgba(30,42,54,0.85);
+            background:rgba(30,42,54,0.92);
             backdrop-filter:blur(8px);
             -webkit-backdrop-filter:blur(8px);
             color:#e8edf0;
-            width:44px;
-            height:44px;
+            width:48px;
+            height:48px;
             border-radius:50%;
-            border:1px solid rgba(255,255,255,0.1);
-            box-shadow:0 4px 16px rgba(0,0,0,0.5);
-            cursor:pointer;
+            border:1px solid rgba(255,255,255,0.12);
+            box-shadow:0 4px 20px rgba(0,0,0,0.6);
+            cursor:grab;
             font-size:1.2rem;
             display:none;
             align-items:center;
             justify-content:center;
             transition:all .25s ease;
-            z-index:20;
-            opacity:0.7;
+            z-index:999;
+            opacity:0.85;
             transform:scale(0.9);
+            touch-action:none;
+            user-select:none;
+            -webkit-user-select:none;
+        }
+        .scroll-down-btn:active{
+            cursor:grabbing;
+            transform:scale(0.95);
+            opacity:1;
         }
         .scroll-down-btn:hover{
             opacity:1;
@@ -143,20 +151,24 @@
             background:rgba(40,56,72,0.95);
             border-color:rgba(79,140,201,0.3);
         }
-        .scroll-down-btn:active{transform:scale(0.95)}
-        .scroll-down-btn.show{display:flex}
+        .scroll-down-btn.show{
+            display:flex;
+            transform:scale(1);
+        }
         .scroll-down-btn .badge{
             position:absolute;
-            top:-4px;
-            right:-4px;
+            top:-6px;
+            right:-6px;
             background:#e06b6b;
             color:#fff;
             border-radius:50%;
-            padding:2px 6px;
-            font-size:.55rem;
+            padding:2px 7px;
+            font-size:.6rem;
             font-weight:bold;
-            min-width:18px;
+            min-width:20px;
             text-align:center;
+            box-shadow:0 2px 8px rgba(224,107,107,0.4);
+            pointer-events:none;
         }
 
         /* === MESSAGES === */
@@ -273,6 +285,8 @@
             align-items:center;
             flex-shrink:0;
             min-height:56px;
+            position:relative;
+            z-index:10;
         }
         .chat-input input[type="text"]{
             flex:1;
@@ -357,6 +371,8 @@
             flex-shrink:0;
             min-height:28px;
             align-items:center;
+            position:relative;
+            z-index:10;
         }
         .debug-info .unread-count{color:#e06b6b;font-weight:bold}
 
@@ -447,7 +463,7 @@
             .chat-header .user-info i{font-size:1.5rem}
             .chat-header .user-info .username{font-size:1rem}
             .chat-messages{padding:12px 12px 8px;gap:4px}
-            .scroll-down-btn{width:38px;height:38px;font-size:1rem;bottom:80px;right:12px}
+            .scroll-down-btn{width:40px;height:40px;font-size:1rem;bottom:80px;right:12px}
             .debug-info{font-size:.5rem;padding:3px 12px;min-height:24px}
             .toast{bottom:70px;font-size:.8rem;padding:8px 16px}
         }
@@ -472,7 +488,7 @@
             .chat-input button{width:32px;height:32px;font-size:.8rem}
             .chat-input .attach-btn{width:30px;height:30px;font-size:.7rem}
             .debug-info{min-height:20px;padding:2px 12px;font-size:.5rem}
-            .scroll-down-btn{width:32px;height:32px;font-size:.8rem;bottom:56px;right:10px}
+            .scroll-down-btn{width:34px;height:34px;font-size:.8rem;bottom:50px;right:10px}
         }
     </style>
 </head>
@@ -537,8 +553,8 @@
     </div>
 
     <div class="chat-messages" id="chatMessages">
-        <!-- SCROLL DOWN BUTTON (flotante) -->
-        <button class="scroll-down-btn" id="scrollDownBtn" title="Ir al mensaje más reciente">
+        <!-- SCROLL DOWN BUTTON (flotante y arrastrable) -->
+        <button class="scroll-down-btn" id="scrollDownBtn" title="Ir al mensaje más reciente (arrastra para mover)">
             <i class="fas fa-chevron-down"></i>
             <span class="badge" id="newMessagesBadge">0</span>
         </button>
@@ -656,6 +672,14 @@
     let lastNotificationTime = 0;
     let isUserScrolling = false;
     let scrollTimeout = null;
+
+    // Variables para el drag del botón
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let btnStartX = 0;
+    let btnStartY = 0;
+    let hasMoved = false;
 
     // ============================================
     // DOM REFS
@@ -1268,7 +1292,11 @@
             chatMessages.appendChild(div);
         });
         
-        chatMessages.appendChild(scrollDownBtn);
+        // El botón scrollDownBtn ya está en el DOM fuera de los mensajes
+        // Solo lo agregamos al final si no existe
+        if (!document.getElementById('scrollDownBtn')) {
+            chatMessages.appendChild(scrollDownBtn);
+        }
         
         if (wasAtBottom) {
             setTimeout(() => scrollToBottom(false), 50);
@@ -1806,6 +1834,84 @@
     }
 
     // ============================================
+    // FUNCIONES DE DRAG PARA EL BOTÓN
+    // ============================================
+    function initDrag(e) {
+        // Solo permitir arrastrar con click izquierdo
+        if (e.type === 'mousedown' && e.button !== 0) return;
+        
+        // Evitar que el click active el scroll
+        e.preventDefault();
+        
+        const touch = e.touches ? e.touches[0] : e;
+        
+        isDragging = true;
+        hasMoved = false;
+        
+        const rect = scrollDownBtn.getBoundingClientRect();
+        btnStartX = rect.left;
+        btnStartY = rect.top;
+        dragStartX = touch.clientX;
+        dragStartY = touch.clientY;
+        
+        scrollDownBtn.style.transition = 'none';
+        scrollDownBtn.style.cursor = 'grabbing';
+        
+        // Guardar posición inicial
+        scrollDownBtn.dataset.startX = btnStartX;
+        scrollDownBtn.dataset.startY = btnStartY;
+    }
+
+    function moveDrag(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        
+        const touch = e.touches ? e.touches[0] : e;
+        const dx = touch.clientX - dragStartX;
+        const dy = touch.clientY - dragStartY;
+        
+        // Si se movió más de 5px, consideramos que es un arrastre
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            hasMoved = true;
+        }
+        
+        if (!hasMoved) return;
+        
+        let newX = btnStartX + dx;
+        let newY = btnStartY + dy;
+        
+        // Limitar dentro de la ventana
+        const btnSize = 48;
+        const margin = 10;
+        const maxX = window.innerWidth - btnSize - margin;
+        const maxY = window.innerHeight - btnSize - margin;
+        
+        newX = Math.max(margin, Math.min(maxX, newX));
+        newY = Math.max(margin, Math.min(maxY, newY));
+        
+        scrollDownBtn.style.left = newX + 'px';
+        scrollDownBtn.style.top = newY + 'px';
+        scrollDownBtn.style.right = 'auto';
+        scrollDownBtn.style.bottom = 'auto';
+    }
+
+    function endDrag(e) {
+        if (!isDragging) return;
+        isDragging = false;
+        scrollDownBtn.style.transition = '';
+        scrollDownBtn.style.cursor = 'grab';
+        
+        // Si no se movió, ejecutar el click (scroll)
+        if (!hasMoved) {
+            // Ejecutar el scroll
+            scrollToBottom(true);
+            if (isChatOpen && currentUser) {
+                setTimeout(() => markMessagesAsRead(), 500);
+            }
+        }
+    }
+
+    // ============================================
     // EVENT LISTENERS
     // ============================================
     cardEagle.onclick = () => loginAs('eagle');
@@ -1831,12 +1937,18 @@
     attachBtn.onclick = () => fileInput.click();
     telegramToggleBtn.onclick = toggleTelegram;
     
-    scrollDownBtn.onclick = () => {
-        scrollToBottom(true);
-        if (isChatOpen && currentUser) {
-            setTimeout(() => markMessagesAsRead(), 500);
-        }
-    };
+    // Eventos de drag para el botón
+    scrollDownBtn.addEventListener('mousedown', initDrag);
+    scrollDownBtn.addEventListener('touchstart', initDrag, { passive: false });
+    
+    document.addEventListener('mousemove', moveDrag);
+    document.addEventListener('touchmove', moveDrag, { passive: false });
+    
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('touchend', endDrag);
+    
+    // Prevenir el contexto del botón derecho
+    scrollDownBtn.addEventListener('contextmenu', (e) => e.preventDefault());
     
     fileInput.onchange = async (e) => {
         if (e.target.files.length > 0) {
